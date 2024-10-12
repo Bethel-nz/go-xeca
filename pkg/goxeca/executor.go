@@ -13,14 +13,7 @@ func NewExecutor() *Executor {
 	return &Executor{}
 }
 
-func (e *Executor) Execute(job *Job) (string, error) {
-	parts := strings.Fields(job.Command)
-	if len(parts) == 0 {
-		return "", fmt.Errorf("empty command")
-	}
-
-	cmd := exec.Command(parts[0], parts[1:]...)
-
+func (e *Executor) Execute(cmd *exec.Cmd) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -31,5 +24,10 @@ func (e *Executor) Execute(job *Job) (string, error) {
 	if stderr.Len() > 0 {
 		output += "\nStderr: " + stderr.String()
 	}
-	return output, err
+
+	if err != nil {
+		return output, fmt.Errorf("command execution failed: %v", err)
+	}
+
+	return strings.TrimSpace(output), nil
 }

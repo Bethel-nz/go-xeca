@@ -1,0 +1,14 @@
+curl -X POST http://localhost:8080/api/add-job \
+     -H "Content-Type: application/json" \
+     -d '{
+         "command": "echo Hello, Goxeca!",
+         "schedule": "in 1 minute",
+         "isRecurring": true,
+         "priority": 5,
+         "dependencies": [],
+         "maxRetries": 3,
+         "retryDelay": 5000000000,
+         "webhook": "http://example.com/webhook",
+         "timeout": 30000000000,
+         "chainedJobs": []
+     }'
