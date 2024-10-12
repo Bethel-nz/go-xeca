@@ -72,7 +72,9 @@ func (m *Manager) AddJob(command string, schedule string, isRecurring bool, prio
 	if isRecurring {
 		if strings.HasPrefix(schedule, "in ") {
 			// For human-readable formats, we'll use a goroutine to schedule the job
-			go m.scheduleRecurringJob(job)
+			go func() {
+				m.scheduleRecurringJob(job)
+			}()
 		} else {
 			// For cron expressions, we'll use the cron library
 			entryID, err := m.cron.AddFunc(schedule, func() { m.executeJob(job) })

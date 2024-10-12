@@ -12,9 +12,6 @@ import (
 
 func RunWeb(manager *goxeca.Manager) {
 
-	// Start React frontend
-	// go startReactFrontend()
-
 	// Set up API routes
 	setupAPIRoutes(manager)
 
@@ -25,17 +22,6 @@ func RunWeb(manager *goxeca.Manager) {
 		log.Fatal("Failed to start web server:", err)
 	}
 }
-
-// func startReactFrontend() {
-// 	cmd := exec.Command("bun", "run", "dev")
-// 	cmd.Dir = "../../web"
-// 	err := cmd.Start()
-// 	if err != nil {
-// 		log.Error("Failed to start React frontend:", err)
-// 	} else {
-// 		log.Info("React frontend starting...")
-// 	}
-// }
 
 func setupAPIRoutes(manager *goxeca.Manager) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +94,16 @@ func setupAPIRoutes(manager *goxeca.Manager) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(apiJobs)
+	})
+
+	http.HandleFunc("/api/webhook", func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			JobID          string `json:"jobID"`
+			Status         string `json:"status"`
+			ExecutionCount int    `json:"executionCount"`
+		}
+		json.NewDecoder(r.Body).Decode(&payload)
+		fmt.Println("Webhook received", payload)
 	})
 }
 
