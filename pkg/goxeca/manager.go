@@ -70,22 +70,36 @@ func (m *Manager) AddJob(command string, schedule string, isRecurring bool, prio
 	m.mu.Unlock()
 
 	if isRecurring {
-		entryID, err := m.cron.AddFunc(schedule, func() { m.executeJob(job) })
-		if err != nil {
-			return nil, fmt.Errorf("failed to add cron job: %v", err)
+		if strings.HasPrefix(schedule, "in ") {
+			// For human-readable formats, we'll use a goroutine to schedule the job
+			go m.scheduleRecurringJob(job)
+		} else {
+			// For cron expressions, we'll use the cron library
+			entryID, err := m.cron.AddFunc(schedule, func() { m.executeJob(job) })
+			if err != nil {
+				return nil, fmt.Errorf("failed to add cron job: %v", err)
+			}
+			job.cronEntryID = entryID
 		}
-		job.cronEntryID = entryID
 	}
 
 	log.Info("Job scheduled", "id", job.ID, "Next Run Time", job.NextRunTime.Format(time.RFC3339))
 	return job, nil
 }
 
-func (m *Manager) Start() {
-	m.cron.Start()
-	go m.runJobs()
+func (m *Manager) scheduleRecurringJob(job *Job) {
+	for {
+		time.Sleep(time.Until(job.NextRunTime))
+		m.executeJob(job)
+		job.NextRunTime = m.scheduler.GetNextRunTime(job.Schedule)
+	}
+}
 
-	select {}
+func (m *Manager) Start() {
+	for {
+		m.cron.Start()
+		go m.runJobs()
+	}
 }
 
 func (m *Manager) Stop() {

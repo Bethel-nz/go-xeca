@@ -15,7 +15,7 @@ func main() {
 	flag.Parse()
 
 	manager := goxeca.NewManager()
-	manager.Start()
+	go manager.Start()
 	defer manager.Stop()
 
 	switch *mode {
