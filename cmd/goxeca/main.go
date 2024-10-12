@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/bethel-nz/goxeca/pkg/goxeca"
@@ -44,6 +45,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	logMessage := fmt.Sprintf("command: %s, time: %s, recurring: %t", command, selectedTime, isRecurring)
+	fmt.Println(logMessage)
 
 	job, err := manager.AddJob(command, selectedTime, isRecurring)
 	if err != nil {

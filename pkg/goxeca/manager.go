@@ -14,6 +14,7 @@ type Manager struct {
 	jobs      map[string]*Job
 	scheduler *Scheduler
 	executor  *Executor
+	queue     *Queue
 	mu        sync.Mutex
 }
 
@@ -22,6 +23,7 @@ func NewManager() *Manager {
 		jobs:      make(map[string]*Job),
 		scheduler: NewScheduler(),
 		executor:  NewExecutor(),
+		queue:     NewQueue(),
 	}
 }
 
@@ -64,17 +66,21 @@ func (m *Manager) runJobs() {
 		m.mu.Lock()
 		for id, job := range m.jobs {
 			if job.NextRunTime.Before(now) && job.Status == JobStatusPending {
-				go func(j *Job) {
-					m.executeJob(j)
-					m.mu.Lock()
-					if !j.Recurring {
-						delete(m.jobs, id)
-					}
-					m.mu.Unlock()
-				}(job)
+				m.queue.Enqueue(job)
+				job.Status = JobStatusQueued
+				m.mu.Lock()
+				if !job.Recurring {
+					delete(m.jobs, id)
+				}
+				m.mu.Unlock()
 			}
 		}
 		m.mu.Unlock()
+
+		for m.queue.Length() > 0 {
+			job := m.queue.Dequeue()
+			go m.executeJob(job)
+		}
 	}
 }
 
@@ -116,4 +122,14 @@ func (m *Manager) executeJob(job *Job) {
 		log.Info(logMessage)
 		os.Exit(0)
 	}
+}
+
+func (m *Manager) GetJob(id string) (*Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, exists := m.jobs[id]
+	if !exists {
+		return nil, fmt.Errorf("job with ID %s not found", id)
+	}
+	return job, nil
 }

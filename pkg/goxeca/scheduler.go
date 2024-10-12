@@ -2,36 +2,42 @@ package goxeca
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
-
-	"github.com/olebedev/when"
-	"github.com/olebedev/when/rules/en"
 )
 
-type Scheduler struct {
-	parser *when.Parser
-}
+type Scheduler struct{}
 
 func NewScheduler() *Scheduler {
-	w := when.New(nil)
-	w.Add(en.All...)
-
-	return &Scheduler{
-		parser: w,
-	}
+	return &Scheduler{}
 }
 
 func (s *Scheduler) ParseSchedule(schedule string) (time.Time, time.Duration, error) {
-	result, err := s.parser.Parse(schedule, time.Now())
+	parts := strings.Fields(schedule)
+	if len(parts) != 3 || parts[0] != "in" {
+		return time.Time{}, 0, fmt.Errorf("invalid schedule format: expected 'in X seconds/minutes/hours/days'")
+	}
+
+	amount, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return time.Time{}, 0, err
-	}
-	if result == nil {
-		return time.Time{}, 0, fmt.Errorf("unable to parse schedule: %s", schedule)
+		return time.Time{}, 0, fmt.Errorf("invalid time amount: %v", err)
 	}
 
-	nextRunTime := result.Time
-	duration := time.Until(nextRunTime)
+	var duration time.Duration
+	switch parts[2] {
+	case "seconds", "second":
+		duration = time.Duration(amount) * time.Second
+	case "minutes", "minute":
+		duration = time.Duration(amount) * time.Minute
+	case "hours", "hour":
+		duration = time.Duration(amount) * time.Hour
+	case "days", "day":
+		duration = time.Duration(amount) * 24 * time.Hour
+	default:
+		return time.Time{}, 0, fmt.Errorf("unsupported time unit: %s", parts[2])
+	}
 
+	nextRunTime := time.Now().Add(duration)
 	return nextRunTime, duration, nil
 }
