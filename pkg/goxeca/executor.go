@@ -20,14 +20,14 @@ func (e *Executor) Execute(cmd *exec.Cmd) (string, error) {
 
 	err := cmd.Run()
 
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		output += "\nStderr: " + stderr.String()
-	}
+	output := strings.TrimSpace(stdout.String()) + strings.TrimSpace(stderr.String())
 
 	if err != nil {
+		if stderr.Len() > 0 {
+			return output, fmt.Errorf("command execution failed: %v, Stderr: %s", err, stderr.String())
+		}
 		return output, fmt.Errorf("command execution failed: %v", err)
 	}
 
-	return strings.TrimSpace(output), nil
+	return output, nil
 }
