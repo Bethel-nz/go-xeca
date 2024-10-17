@@ -1,24 +1,86 @@
-# GoXeca
+# GoXeca - Job Scheduler & Executor
 
-original inspiration:
-- [Albrow Jobs](https://github.com/albrow/jobs) - for job processing and execution
-- [Olebedev When](https://github.com/olebedev/when) - for time parsing
+GoXeca is a flexible and scalable job scheduling and execution system built in Go. GoXeca is designed to handle complex job execution with a focus on reliability, concurrency, and performance.
 
 
-xeca runs as intended but each processes take about 23-30s to get executed which is slow for simple commands like running a ping or making api calls to check server health,
-you can send job requests to the server via the /api/add-job endpoint, and get a list of all the jobs in /api/jobs...
+## Key Features
 
-## Todo:
-- [ ] understand how go routines work properly
-- [ ] fix the jobs execution time
-- [ ] handle job chaining and more concurrently
-- [ ] build a simple react frontend to interact with the system
+- Job Scheduling & Execution: Efficiently schedule and execute tasks with configurable timing and concurrency.
 
+- Time Parsing: Leverages powerful natural language time parsing for flexible job timings.
 
-## use case
-xeca's original use case was for running deployment checks running api health status e.t.c 
+- Job Chaining & Concurrency: Supports executing jobs in sequence or in parallel to improve workflow efficiency.
+
+- Scalability: Designed to scale across different job loads using Go’s goroutines for lightweight task execution.
 
 
-## License
+## Inspiration
 
-MIT
+Albrow Jobs – Influenced the job processing and execution design.
+
+
+## Use Case
+
+GoXeca is ideal for tasks like:
+
+- Deployment Checks: Automate system and API health checks.
+
+- Task Orchestration: Efficiently run scheduled or ad-hoc background tasks.
+
+- System Monitoring: Periodically run status checks or other monitoring jobs.
+
+
+Roadmap
+
+Here's what’s planned:
+
+[x] Fully optimize goroutine usage for improved concurrency management.
+
+[ ] Refine job execution time handling for better accuracy.
+
+[ ] Implement advanced job chaining and dependency management.
+
+[ ] Develop a React-based frontend to visualize and interact with scheduled jobs.
+
+
+Getting Started
+
+Clone the repo:
+
+``` bash
+
+git clone https://github.com/Bethel-nz/goxeca.git
+cd goxeca
+
+```
+
+
+Install Dependencies:
+
+```bash
+
+go mod tidy
+
+```
+Run GoXeca:
+
+```bash
+
+go run main.go
+
+```
+
+
+Future Enhancements
+
+[ ] Improve logging and error handling.
+
+[ ] Implement retry logic for failed jobs.
+
+[ ] Add support for persistence using Redis and PostgreSQL.
+
+
+License
+
+This project is licensed under the MIT License.
+
