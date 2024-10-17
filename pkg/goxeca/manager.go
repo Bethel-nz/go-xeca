@@ -297,49 +297,6 @@ func (m *Manager) sendWebhook(job *Job) {
 	}
 }
 
-func (m *Manager) CreateJobTemplate(name string, template JobTemplate) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, exists := m.templates[name]; exists {
-		return fmt.Errorf("template with name %s already exists", name)
-	}
-	m.templates[name] = template
-	return nil
-}
-
-func (m *Manager) AddJobFromTemplate(templateName string, customizations map[string]interface{}) (*Job, error) {
-	m.mu.RLock()
-	template, exists := m.templates[templateName]
-	m.mu.RUnlock()
-	if !exists {
-		return nil, fmt.Errorf("template with name %s not found", templateName)
-	}
-
-	// Apply customizations
-	for key, value := range customizations {
-		switch key {
-		case "command":
-			template.Command = value.(string)
-		case "schedule":
-			template.Schedule = value.(string)
-			// Add more customization options as needed
-		}
-	}
-
-	return m.AddJob(
-		template.Command,
-		template.Schedule,
-		template.Recurring,
-		template.Priority,
-		template.Dependencies,
-		template.MaxRetries,
-		template.RetryDelay,
-		template.Webhook,
-		template.Timeout,
-		template.ChainedJobs,
-	)
-}
-
 func (m *Manager) GetJob(id string) (*Job, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
