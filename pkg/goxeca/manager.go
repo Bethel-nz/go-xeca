@@ -14,42 +14,65 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"github.com/shirou/gopsutil/cpu"
 )
 
-type Manager struct {
-	jobs          map[string]*Job
-	scheduler     *Scheduler
-	executor      *Executor
-	mu            sync.RWMutex
-	done          chan struct{}
-	maxConcurrent int
-	runningJobs   int
-	runningJobsMu sync.Mutex
-	templates     map[string]JobTemplate
-	cron          *cron.Cron
-	jobQueue      chan *Job
+type ManagerConfig struct {
+	MaxConcurrent int
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+	JobQueueSize  int
 }
 
-func NewManager() *Manager {
+type Manager struct {
+	scheduler      *Scheduler
+	executor       *Executor
+	mu             sync.RWMutex
+	done           chan struct{}
+	maxConcurrent  int
+	runningJobs    int
+	runningJobsMu  sync.Mutex
+	cron           *cron.Cron
+	jobQueue       chan *Job
+	db             *XecaDB
+	config         ManagerConfig
+	autoscalerDone chan struct{}
+	workerPool     chan struct{}
+}
+
+func NewManager(config ManagerConfig) *Manager {
+	// Set default values if empty
+	if config.MaxConcurrent == 0 {
+		config.MaxConcurrent = 10
+	}
+	if config.JobQueueSize == 0 {
+		config.JobQueueSize = 100
+	}
+
 	m := &Manager{
-		jobs:          make(map[string]*Job),
-		scheduler:     NewScheduler(),
-		executor:      NewExecutor(),
-		done:          make(chan struct{}),
-		maxConcurrent: 10,
-		templates:     make(map[string]JobTemplate),
-		cron:          cron.New(),
-		jobQueue:      make(chan *Job, 100), // Buffered channel to prevent blocking
+		scheduler:      NewScheduler(),
+		executor:       NewExecutor(),
+		done:           make(chan struct{}),
+		maxConcurrent:  config.MaxConcurrent,
+		cron:           cron.New(),
+		jobQueue:       make(chan *Job, config.JobQueueSize),
+		db:             NewXecaDB(config.RedisAddr, config.RedisPassword, config.RedisDB),
+		config:         config,
+		autoscalerDone: make(chan struct{}),
+		workerPool:     make(chan struct{}, config.MaxConcurrent),
 	}
 	go m.jobWorker()
 	return m
 }
 
-func (m *Manager) AddJob(command string, schedule string, isRecurring bool, priority int, dependencies []string, maxRetries int, retryDelay time.Duration, webhook string, timeout time.Duration, chainedJobs []string) (*Job, error) {
+func (m *Manager) AddJob(command string, schedule string, priority int, dependencies []string, maxRetries int, retryDelay time.Duration, webhook string, timeout time.Duration) (*Job, error) {
 	nextRunTime, duration, err := m.scheduler.ParseSchedule(schedule)
 	if err != nil {
 		return nil, err
 	}
+
+	isRecurring := strings.HasPrefix(schedule, "every ") || m.scheduler.IsCronSchedule(schedule)
 
 	job := &Job{
 		ID:             uuid.New().String(),
@@ -66,15 +89,16 @@ func (m *Manager) AddJob(command string, schedule string, isRecurring bool, prio
 		RetryDelay:     retryDelay,
 		Webhook:        webhook,
 		Timeout:        timeout,
-		ChainedJobs:    chainedJobs,
+		ActiveRuns:     0,
+		TotalRuns:      0,
 	}
 
-	m.mu.Lock()
-	m.jobs[job.ID] = job
-	m.mu.Unlock()
+	if err := m.db.StoreJob(job); err != nil {
+		return nil, fmt.Errorf("failed to store job in Redis: %w", err)
+	}
 
 	if isRecurring {
-		if strings.HasPrefix(schedule, "in ") {
+		if strings.HasPrefix(schedule, "every ") {
 			go m.scheduleRecurringJob(job)
 		} else {
 			entryID, err := m.cron.AddFunc(schedule, func() { m.queueJob(job) })
@@ -101,16 +125,21 @@ func (m *Manager) scheduleRecurringJob(job *Job) {
 	}
 }
 
+// Start starts the manager and its components
 func (m *Manager) Start() {
 	m.cron.Start()
 	go m.runJobs()
+	go m.runAutoscaler()
 }
 
+// Stop stops the manager and its components
 func (m *Manager) Stop() {
 	m.cron.Stop()
 	close(m.done)
+	close(m.autoscalerDone)
 }
 
+// runJobs runs the job scheduler
 func (m *Manager) runJobs() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -125,27 +154,39 @@ func (m *Manager) runJobs() {
 	}
 }
 
+// checkAndQueueJobs checks for pending jobs and queues them
 func (m *Manager) checkAndQueueJobs() {
-	now := time.Now()
-	var eligibleJobs []*Job
-
-	m.mu.RLock()
-	for _, job := range m.jobs {
-		if job.NextRunTime.Before(now) && job.Status == JobStatusPending && !job.Paused && m.areDependenciesMet(job) {
-			eligibleJobs = append(eligibleJobs, job)
-		}
+	pendingJobs, err := m.db.GetPendingJobs()
+	if err != nil {
+		log.Error("Failed to fetch pending jobs", "error", err)
+		return
 	}
-	m.mu.RUnlock()
 
-	sort.Slice(eligibleJobs, func(i, j int) bool {
-		return eligibleJobs[i].Priority > eligibleJobs[j].Priority
+	sort.Slice(pendingJobs, func(i, j int) bool {
+		return pendingJobs[i].Priority > pendingJobs[j].Priority
 	})
 
-	for _, job := range eligibleJobs {
-		m.queueJob(job)
+	for _, job := range pendingJobs {
+		if job.Recurring {
+			// Check if the job is already running
+			currentStatus, err := m.db.GetJobStatus(job.ID)
+			if err != nil {
+				log.Error("Failed to get job status", "id", job.ID, "error", err)
+				continue
+			}
+			if currentStatus == JobStatusRunning {
+				log.Info("Skipping recurring job that is already running", "id", job.ID)
+				continue
+			}
+		}
+
+		if m.areDependenciesMet(job) {
+			m.queueJob(job)
+		}
 	}
 }
 
+// queueJob queues a job for execution
 func (m *Manager) queueJob(job *Job) {
 	select {
 	case m.jobQueue <- job:
@@ -155,6 +196,7 @@ func (m *Manager) queueJob(job *Job) {
 	}
 }
 
+// jobWorker is a worker that executes jobs
 func (m *Manager) jobWorker() {
 	for {
 		select {
@@ -179,17 +221,51 @@ func (m *Manager) jobWorker() {
 	}
 }
 
+// executeJob executes a job
 func (m *Manager) executeJob(job *Job) {
-	m.mu.Lock()
-	if job.Status != JobStatusPending {
-		m.mu.Unlock()
-		return
+	m.workerPool <- struct{}{}
+	go func() {
+		defer func() { <-m.workerPool }()
+		if !m.prepareJobExecution(job) {
+			return
+		}
+
+		startTime := time.Now()
+		output, err := m.runJobCommand(job)
+		endTime := time.Now()
+
+		m.handleJobCompletion(job, output, err, startTime, endTime)
+	}()
+}
+
+// prepareJobExecution prepares a job for execution
+func (m *Manager) prepareJobExecution(job *Job) bool {
+	currentJob, err := m.db.GetJob(job.ID)
+	if err != nil {
+		log.Error("Failed to get current job state", "id", job.ID, "error", err)
+		return false
 	}
-	job.Status = JobStatusRunning
-	m.mu.Unlock()
+	if currentJob.Status == JobStatusCancelled || currentJob.Status == JobStatusPaused {
+		log.Info("Job execution skipped due to status", "id", job.ID, "status", currentJob.Status)
+		return false
+	}
 
-	startTime := time.Now()
+	if err := m.db.UpdateJobStatus(job.ID, JobStatusRunning); err != nil {
+		log.Error("Failed to update job status", "id", job.ID, "error", err)
+		return false
+	}
 
+	if job.Recurring {
+		if err := m.db.IncrementActiveRuns(job.ID); err != nil {
+			log.Error("Failed to increment active runs", "error", err)
+		}
+	}
+
+	return true
+}
+
+// runJobCommand runs a job command
+func (m *Manager) runJobCommand(job *Job) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), job.Timeout)
 	defer cancel()
 
@@ -198,9 +274,11 @@ func (m *Manager) executeJob(job *Job) {
 		cmd = exec.CommandContext(ctx, "cmd", "/C", job.Command)
 	}
 
-	output, err := m.executor.Execute(cmd)
+	return m.executor.Execute(cmd)
+}
 
-	endTime := time.Now()
+// handleJobCompletion handles the completion of a job
+func (m *Manager) handleJobCompletion(job *Job, output string, err error, startTime, endTime time.Time) {
 	duration := endTime.Sub(startTime)
 
 	jobHistory := JobHistory{
@@ -214,81 +292,94 @@ func (m *Manager) executeJob(job *Job) {
 	defer m.mu.Unlock()
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			job.Status = JobStatusFailed
-			jobHistory.Status = JobStatusFailed
-			errorMsg := fmt.Sprintf("Job timed out after %v", duration)
-			output += "\n" + errorMsg
-			log.Error(errorMsg, "id", job.ID)
-		} else {
-			job.Status = JobStatusFailed
-			jobHistory.Status = JobStatusFailed
-			errorMsg := fmt.Sprintf("Job failed: %v", err)
-			output += "\n" + errorMsg
-			log.Error(errorMsg, "id", job.ID)
-		}
+		m.handleJobError(job, err, duration, &jobHistory)
 	} else {
-		job.Status = JobStatusCompleted
-		jobHistory.Status = JobStatusCompleted
-		log.Info("Job completed", "id", job.ID, "duration", duration)
+		m.handleJobSuccess(job, &jobHistory)
 	}
 
-	// Store the output (including any error messages) in the job
-	job.Output = output
+	m.updateJobState(job, &jobHistory)
+}
 
-	// Log the job output
-	log.Info("Job output", "id", job.ID, "output", job.Output)
+// handleJobError handles the error of a job
+func (m *Manager) handleJobError(job *Job, err error, duration time.Duration, jobHistory *JobHistory) {
+	if err == context.DeadlineExceeded {
+		job.Status = JobStatusFailed
+		jobHistory.Status = JobStatusFailed
+		errorMsg := fmt.Sprintf("Job timed out after %v", duration)
+		jobHistory.Output += "\n" + errorMsg
+		log.Error(errorMsg, "id", job.ID)
+	} else {
+		job.Status = JobStatusFailed
+		jobHistory.Status = JobStatusFailed
+		log.Error("Job failed", "id", job.ID, "error", err)
+	}
 
-	jobHistory.Output = output
-	job.History = append(job.History, jobHistory)
+	job.RetryCount++
+	if job.RetryCount <= job.MaxRetries {
+		job.Status = JobStatusPending
+		job.NextRunTime = time.Now().Add(job.RetryDelay)
+	}
+}
+
+// handleJobSuccess handles the success of a job
+func (m *Manager) handleJobSuccess(job *Job, jobHistory *JobHistory) {
+	job.Status = JobStatusCompleted
+	jobHistory.Status = JobStatusCompleted
+	log.Info("Job completed successfully", "id", job.ID)
+}
+
+// updateJobState updates the state of a job
+func (m *Manager) updateJobState(job *Job, jobHistory *JobHistory) {
 	job.ExecutionCount++
+	job.History = append(job.History, *jobHistory)
 
 	if job.Webhook != "" {
 		go m.sendWebhook(job)
 	}
 
-	if job.Status == JobStatusCompleted && len(job.ChainedJobs) > 0 {
-		for _, chainedJobID := range job.ChainedJobs {
-			if chainedJob, exists := m.jobs[chainedJobID]; exists {
-				chainedJob.NextRunTime = time.Now()
-				m.queueJob(chainedJob)
-			}
+	if job.Recurring {
+		if err := m.db.DecrementActiveRuns(job.ID); err != nil {
+			log.Error("Failed to decrement active runs", "error", err)
+		}
+		if err := m.db.IncrementTotalRuns(job.ID); err != nil {
+			log.Error("Failed to increment total runs", "error", err)
 		}
 	}
 
-	if !job.Recurring || (job.Status == JobStatusFailed && job.ExecutionCount > job.MaxRetries) {
-		delete(m.jobs, job.ID)
-	} else if job.Recurring {
+	if job.Recurring {
 		job.Status = JobStatusPending
 		job.NextRunTime = m.scheduler.GetNextRunTime(job.Schedule)
+		if err := m.db.StoreJob(job); err != nil {
+			log.Error("Failed to update recurring job", "id", job.ID, "error", err)
+		}
+	} else if job.Status == JobStatusCompleted || (job.Status == JobStatusFailed && job.ExecutionCount > job.MaxRetries) {
+		if err := m.db.StoreJobWithTTL(job, 24*time.Hour); err != nil {
+			log.Error("Failed to update job with TTL", "id", job.ID, "error", err)
+		}
+	}
+
+	if err := m.db.UpdateJobStatus(job.ID, job.Status); err != nil {
+		log.Error("Failed to update job status", "id", job.ID, "error", err)
 	}
 }
 
+// StopJob stops a job
 func (m *Manager) StopJob(jobID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	job, exists := m.jobs[jobID]
-	if !exists {
-		return fmt.Errorf("job with ID %s not found", jobID)
+	job, err := m.db.GetJob(jobID)
+	if err != nil {
+		return fmt.Errorf("job with ID %s not found: %w", jobID, err)
 	}
 
-	switch job.Status {
-	case JobStatusRunning:
-		job.Status = JobStatusCancelled
-	case JobStatusPending, JobStatusPaused:
-		delete(m.jobs, jobID)
-	default:
-		return fmt.Errorf("job with ID %s is already stopped or completed", jobID)
-	}
-
+	job.Status = JobStatusCancelled
 	if job.Recurring {
 		m.cron.Remove(cron.EntryID(job.cronEntryID))
 	}
 
-	return nil
+	log.Info("Job cancelled", "id:", job.ID)
+	return m.db.StoreJob(job)
 }
 
+// sendWebhook sends a webhook for a job
 func (m *Manager) sendWebhook(job *Job) {
 	payload := fmt.Sprintf(`{"jobID": "%s", "status": "%s", "executionCount": %d}`, job.ID, job.Status, job.ExecutionCount)
 	_, err := http.Post(job.Webhook, "application/json", strings.NewReader(payload))
@@ -297,95 +388,64 @@ func (m *Manager) sendWebhook(job *Job) {
 	}
 }
 
-func (m *Manager) CreateJobTemplate(name string, template JobTemplate) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, exists := m.templates[name]; exists {
-		return fmt.Errorf("template with name %s already exists", name)
-	}
-	m.templates[name] = template
-	return nil
-}
-
-func (m *Manager) AddJobFromTemplate(templateName string, customizations map[string]interface{}) (*Job, error) {
-	m.mu.RLock()
-	template, exists := m.templates[templateName]
-	m.mu.RUnlock()
-	if !exists {
-		return nil, fmt.Errorf("template with name %s not found", templateName)
-	}
-
-	// Apply customizations
-	for key, value := range customizations {
-		switch key {
-		case "command":
-			template.Command = value.(string)
-		case "schedule":
-			template.Schedule = value.(string)
-			// Add more customization options as needed
-		}
-	}
-
-	return m.AddJob(
-		template.Command,
-		template.Schedule,
-		template.Recurring,
-		template.Priority,
-		template.Dependencies,
-		template.MaxRetries,
-		template.RetryDelay,
-		template.Webhook,
-		template.Timeout,
-		template.ChainedJobs,
-	)
-}
-
+// GetJob gets a job by ID
 func (m *Manager) GetJob(id string) (*Job, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	job, exists := m.jobs[id]
-	if !exists {
-		return nil, fmt.Errorf("job with ID %s not found", id)
-	}
-	return job, nil
+	return m.db.GetJob(id)
 }
 
+// PauseJob pauses a job
 func (m *Manager) PauseJob(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	job, exists := m.jobs[id]
-	if !exists {
-		return fmt.Errorf("job with ID %s not found", id)
+	job, err := m.db.GetJob(id)
+	if err != nil {
+		return fmt.Errorf("job with ID %s not found: %w", id, err)
 	}
 	job.Status = JobStatusPaused
-	return nil
+	job.Paused = true
+	if job.Recurring {
+		if job.cronEntryID != 0 {
+			m.cron.Remove(cron.EntryID(job.cronEntryID))
+		}
+		// For "every X" schedules, we don't need to do anything extra
+	}
+	return m.db.StoreJob(job)
 }
 
+// ResumeJob resumes a job
 func (m *Manager) ResumeJob(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	job, exists := m.jobs[id]
-	if !exists {
-		return fmt.Errorf("job with ID %s not found", id)
+	job, err := m.db.GetJob(id)
+	if err != nil {
+		return fmt.Errorf("job with ID %s not found: %w", id, err)
 	}
 	job.Status = JobStatusPending
-	return nil
+	job.Paused = false
+	if job.Recurring {
+		if strings.HasPrefix(job.Schedule, "every ") {
+			go m.scheduleRecurringJob(job)
+		} else {
+			entryID, err := m.cron.AddFunc(job.Schedule, func() { m.queueJob(job) })
+			if err != nil {
+				return fmt.Errorf("failed to resume cron job: %v", err)
+			}
+			job.cronEntryID = entryID
+		}
+	}
+	return m.db.StoreJob(job)
 }
 
+// SetMaxConcurrent sets the maximum number of concurrent jobs
 func (m *Manager) SetMaxConcurrent(max int) {
 	m.runningJobsMu.Lock()
 	defer m.runningJobsMu.Unlock()
 	m.maxConcurrent = max
 }
 
+// areDependenciesMet checks if the dependencies of a job are met
 func (m *Manager) areDependenciesMet(job *Job) bool {
 	for _, depID := range job.Dependencies {
-		m.mu.RLock()
-		dep, exists := m.jobs[depID]
-		m.mu.RUnlock()
-		if !exists {
-			// If the dependency job doesn't exist, we assume it has completed
-			continue
+		dep, err := m.db.GetJob(depID)
+		if err != nil {
+			log.Error("Failed to fetch dependency job", "id", depID, "error", err)
+			return false
 		}
 		if dep.Status != JobStatusCompleted {
 			return false
@@ -394,25 +454,16 @@ func (m *Manager) areDependenciesMet(job *Job) bool {
 	return true
 }
 
-func (m *Manager) ListJobs() []*Job {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	jobs := make([]*Job, 0, len(m.jobs))
-	for _, job := range m.jobs {
-		jobCopy := *job
-		jobs = append(jobs, &jobCopy)
-	}
-	return jobs
+// ListJobs lists all jobs
+func (m *Manager) ListJobs() ([]*Job, error) {
+	return m.db.FetchAllJobs()
 }
 
+// GetJobOutput gets the output of a job
 func (m *Manager) GetJobOutput(jobID string) (string, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	job, exists := m.jobs[jobID]
-	if !exists {
-		return "", fmt.Errorf("job with ID %s not found", jobID)
+	job, err := m.db.GetJob(jobID)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch job %s: %w", jobID, err)
 	}
 
 	if len(job.History) == 0 {
@@ -421,4 +472,146 @@ func (m *Manager) GetJobOutput(jobID string) (string, error) {
 
 	// Return the output of the most recent execution
 	return string(job.History[len(job.History)-1].Output), nil
+}
+
+// CompleteRecurringJob completes a recurring job
+func (m *Manager) CompleteRecurringJob(jobID string) error {
+	job, err := m.db.GetJob(jobID)
+	if err != nil {
+		return fmt.Errorf("job with ID %s not found: %w", jobID, err)
+	}
+
+	if !job.Recurring {
+		return fmt.Errorf("job with ID %s is not a recurring job", jobID)
+	}
+
+	// Remove the cron entry
+	if job.cronEntryID != 0 {
+		m.cron.Remove(cron.EntryID(job.cronEntryID))
+	}
+
+	// Mark the recurring job as completed
+	job.Status = JobStatusCompleted
+	job.Recurring = false
+	if err := m.db.StoreJob(job); err != nil {
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+
+	return nil
+}
+
+// runAutoscaler runs the autoscaler best for systems with low memory or high memeory usage
+
+func (m *Manager) runAutoscaler() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.autoscalerDone:
+			return
+		case <-ticker.C:
+			m.adjustConcurrency()
+		}
+	}
+}
+
+func (m *Manager) adjustConcurrency() {
+	cpuUsage, _ := cpu.Percent(time.Second, false)
+	avgCPUUsage := cpuUsage[0]
+
+	log.Info("Current CPU usage", "usage", avgCPUUsage, "maxConcurrent", m.maxConcurrent)
+
+	if avgCPUUsage < 30 {
+		// Low CPU usage, try to resume paused jobs
+		m.resumePausedJobs()
+		newMax := m.maxConcurrent + 1
+		m.SetMaxConcurrent(newMax)
+		log.Info("Increased max concurrent jobs", "new_max", newMax)
+	} else if avgCPUUsage > 80 {
+		// High CPU usage, pause least priority job and decrease concurrency
+		m.pauseLeastPriorityJob()
+		newMax := m.maxConcurrent - 1
+		if newMax < 1 {
+			newMax = 1
+		}
+		m.SetMaxConcurrent(newMax)
+		log.Info("Decreased max concurrent jobs", "new_max", newMax)
+	}
+}
+
+func (m *Manager) pauseLeastPriorityJob() {
+	jobs, err := m.ListJobs()
+	if err != nil {
+		log.Error("Failed to list jobs", "error", err)
+		return
+	}
+
+	var leastPriorityJob *Job
+	for _, job := range jobs {
+		if job.Status == JobStatusRunning && (leastPriorityJob == nil || job.Priority < leastPriorityJob.Priority) {
+			leastPriorityJob = job
+		}
+	}
+
+	if leastPriorityJob != nil {
+		err := m.PauseJob(leastPriorityJob.ID)
+		if err != nil {
+			log.Error("Failed to pause job", "id", leastPriorityJob.ID, "error", err)
+		} else {
+			log.Info("Paused least priority job", "id", leastPriorityJob.ID, "priority", leastPriorityJob.Priority)
+		}
+	} else {
+		log.Info("No running jobs to pause")
+	}
+}
+
+func (m *Manager) resumePausedJobs() {
+	jobs, err := m.ListJobs()
+	if err != nil {
+		log.Error("Failed to list jobs", "error", err)
+		return
+	}
+
+	resumedCount := 0
+	for _, job := range jobs {
+		if job.Status == JobStatusPaused {
+			err := m.ResumeJob(job.ID)
+			if err != nil {
+				log.Error("Failed to resume job", "id", job.ID, "error", err)
+			} else {
+				resumedCount++
+				log.Info("Resumed paused job", "id", job.ID)
+			}
+		}
+	}
+
+	if resumedCount == 0 {
+		log.Info("No paused jobs to resume")
+	} else {
+		log.Info("Resumed paused jobs", "count", resumedCount)
+	}
+}
+
+// RetryJob retries a job
+func (m *Manager) RetryJob(jobID string) error {
+	job, err := m.db.GetJob(jobID)
+	if err != nil {
+		return fmt.Errorf("job with ID %s not found: %w", jobID, err)
+	}
+
+	if job.Status != JobStatusFailed && job.Status != JobStatusCancelled {
+		return fmt.Errorf("job with ID %s is not in a failed or cancelled state", jobID)
+	}
+
+	job.Status = JobStatusPending
+	job.RetryCount = 0
+	job.NextRunTime = time.Now()
+
+	if err := m.db.StoreJob(job); err != nil {
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+
+	m.queueJob(job)
+	return nil
 }

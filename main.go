@@ -14,8 +14,15 @@ func main() {
 	mode := flag.String("mode", "cli", "Mode to run the application (cli or web)")
 	flag.Parse()
 
-	manager := goxeca.NewManager()
-	go manager.Start()
+	config := goxeca.ManagerConfig{
+		MaxConcurrent: 20,
+		RedisAddr:     "localhost:6379",
+		RedisPassword: "",
+		RedisDB:       1,
+		JobQueueSize:  100,
+	}
+	manager := goxeca.NewManager(config)
+	manager.Start()
 	defer manager.Stop()
 
 	switch *mode {
@@ -26,5 +33,4 @@ func main() {
 	default:
 		log.Fatal("Invalid mode. Use 'cli' or 'web'")
 	}
-
 }
