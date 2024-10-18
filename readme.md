@@ -38,7 +38,9 @@ Here's what’s planned:
 
 [ ] Develop a React-based frontend to visualize and interact with scheduled jobs.
 
-Getting Started
+
+
+## Getting Started
 
 Clone the repo:
 
