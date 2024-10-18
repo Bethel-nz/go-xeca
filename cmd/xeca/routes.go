@@ -10,17 +10,35 @@ func Routes(manager *goxeca.Manager) http.Handler {
 	mux := http.NewServeMux()
 	handler := &Handler{manager}
 
-	mux.HandleFunc("/{$}", handler.home)
+	// handles the home route
+	mux.HandleFunc("GET /{$}", handler.home)
 
-	mux.HandleFunc("/api/status", handler.status)
+	// returns the status and version of the backend
+	mux.HandleFunc("GET /api/status", handler.status)
 
-	mux.HandleFunc("/api/add-job", handler.addJob)
+	// adds a new job to the manager
+	mux.HandleFunc("POST /api/add-job", handler.addJob)
 
-	mux.HandleFunc("/api/jobs", handler.listJobs)
+	// lists all jobs
+	mux.HandleFunc("GET /api/jobs", handler.listJobs)
 
-	mux.HandleFunc("/api/webhook", handler.webhook)
+	// temporary: but it serves as a place holder for webhooks
+	mux.HandleFunc("POST /api/webhook", handler.webhook)
 
-	mux.HandleFunc("/api/job-output/{id}", handler.jobOutput)
+	// returns the output of a particular job
+	mux.HandleFunc("GET /api/job-output/{id}", handler.jobOutput)
+
+	// pauses a job
+	mux.HandleFunc("POST /api/jobs/{id}/pause", handler.pauseJob)
+
+	// resumes a job
+	mux.HandleFunc("POST /api/jobs/{id}/resume", handler.resumeJob)
+
+	// stops a job
+	mux.HandleFunc("POST /api/jobs/{id}/stop", handler.stopJob)
+
+	// retries a job
+	mux.HandleFunc("POST /api/jobs/{id}/retry", handler.retryJob)
 
 	return mux
 }

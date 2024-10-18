@@ -42,25 +42,46 @@ func (h *Handler) addJob(w http.ResponseWriter, r *http.Request) {
 	job, err := h.manager.AddJob(
 		jobRequest.Command,
 		jobRequest.Schedule,
-		jobRequest.IsRecurring,
 		jobRequest.Priority,
 		jobRequest.Dependencies,
 		jobRequest.MaxRetries,
 		jobRequest.RetryDelay,
 		jobRequest.Webhook,
 		jobRequest.Timeout,
-		jobRequest.ChainedJobs,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"id": job.ID})
+	response := map[string]interface{}{
+		"message": "Job added successfully",
+		"job": map[string]interface{}{
+			"id":           job.ID,
+			"command":      job.Command,
+			"schedule":     job.Schedule,
+			"status":       job.Status,
+			"nextRunTime":  job.NextRunTime,
+			"recurring":    job.Recurring,
+			"priority":     job.Priority,
+			"dependencies": job.Dependencies,
+			"maxRetries":   job.MaxRetries,
+			"retryDelay":   job.RetryDelay,
+			"webhook":      job.Webhook,
+			"timeout":      job.Timeout,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func (h *Handler) listJobs(w http.ResponseWriter, r *http.Request) {
-	jobs := h.manager.ListJobs()
+	jobs, err := h.manager.ListJobs()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	apiJobs := make([]APIJob, len(jobs))
 	for i, job := range jobs {
 		apiJobs[i] = APIJob{
@@ -83,7 +104,8 @@ func (h *Handler) webhook(w http.ResponseWriter, r *http.Request) {
 		ExecutionCount int    `json:"executionCount"`
 	}
 	json.NewDecoder(r.Body).Decode(&payload)
-	fmt.Println("Webhook received", payload)
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintln(w, "Webhook received", payload)
 }
 
 func (h *Handler) jobOutput(w http.ResponseWriter, r *http.Request) {
@@ -95,4 +117,63 @@ func (h *Handler) jobOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(output))
+}
+
+func (h *Handler) pauseJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	err := h.manager.PauseJob(jobID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	job, _ := h.manager.GetJob(jobID)
+	response := map[string]interface{}{
+		"message": "Job paused successfully",
+		"job":     job,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) resumeJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	err := h.manager.ResumeJob(jobID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	job, _ := h.manager.GetJob(jobID)
+	response := map[string]interface{}{
+		"message": "Job resumed successfully",
+		"job":     job,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) stopJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	err := h.manager.StopJob(jobID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	job, _ := h.manager.GetJob(jobID)
+	response := map[string]interface{}{
+		"message": "Job stopped successfully",
+		"job":     job,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) retryJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	err := h.manager.RetryJob(jobID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write([]byte("Job retried successfully"))
 }

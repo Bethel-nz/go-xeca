@@ -27,6 +27,8 @@ func RunCLI(manager *goxeca.Manager) {
 		pauseJob(manager)
 	case "resume":
 		resumeJob(manager)
+	case "complete":
+		completeRecurringJob(manager)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -52,7 +54,7 @@ func addJob(manager *goxeca.Manager) {
 	command := os.Args[2]
 	schedule := os.Args[3]
 
-	job, err := manager.AddJob(command, schedule, false, 1, nil, 0, 0, "", 0, nil)
+	job, err := manager.AddJob(command, schedule, 1, nil, 0, 0, "", 0)
 	if err != nil {
 		log.Error("Error adding job:", err)
 		return
@@ -62,7 +64,11 @@ func addJob(manager *goxeca.Manager) {
 }
 
 func listJobs(manager *goxeca.Manager) {
-	jobs := manager.ListJobs()
+	jobs, err := manager.ListJobs()
+	if err != nil {
+		log.Error("Error listing jobs:", err)
+		return
+	}
 	for _, job := range jobs {
 		fmt.Printf("ID: %s, Command: %s, Status: %s\n", job.ID, job.Command, job.Status)
 	}
@@ -114,4 +120,20 @@ func resumeJob(manager *goxeca.Manager) {
 	}
 
 	fmt.Printf("Job %s resumed\n", jobID)
+}
+
+func completeRecurringJob(manager *goxeca.Manager) {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: xeca complete <job_id>")
+		return
+	}
+
+	jobID := os.Args[2]
+	err := manager.CompleteRecurringJob(jobID)
+	if err != nil {
+		log.Error("Error completing recurring job:", err)
+		return
+	}
+
+	fmt.Printf("Recurring job %s marked as completed\n", jobID)
 }

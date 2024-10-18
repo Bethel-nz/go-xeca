@@ -42,20 +42,7 @@ type Job struct {
 	History        []JobHistory
 	Webhook        string
 	Timeout        time.Duration
-	ChainedJobs    []string
-	Template       bool
 	cronEntryID    cron.EntryID
-}
-
-type JobTemplate struct {
-	Command      string
-	Schedule     string
-	Recurring    bool
-	Priority     int
-	Dependencies []string
-	MaxRetries   int
-	RetryDelay   time.Duration
-	Webhook      string
-	Timeout      time.Duration
-	ChainedJobs  []string
+	ActiveRuns     int
+	TotalRuns      int
 }

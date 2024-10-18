@@ -2,7 +2,6 @@
 
 GoXeca is a flexible and scalable job scheduling and execution system built in Go. GoXeca is designed to handle complex job execution with a focus on reliability, concurrency, and performance.
 
-
 ## Key Features
 
 - Job Scheduling & Execution: Efficiently schedule and execute tasks with configurable timing and concurrency.
@@ -13,11 +12,9 @@ GoXeca is a flexible and scalable job scheduling and execution system built in G
 
 - Scalability: Designed to scale across different job loads using Go’s goroutines for lightweight task execution.
 
-
 ## Inspiration
 
 Albrow Jobs – Influenced the job processing and execution design.
-
 
 ## Use Case
 
@@ -28,7 +25,6 @@ GoXeca is ideal for tasks like:
 - Task Orchestration: Efficiently run scheduled or ad-hoc background tasks.
 
 - System Monitoring: Periodically run status checks or other monitoring jobs.
-
 
 Roadmap
 
@@ -42,18 +38,16 @@ Here's what’s planned:
 
 [ ] Develop a React-based frontend to visualize and interact with scheduled jobs.
 
-
 Getting Started
 
 Clone the repo:
 
-``` bash
+```bash
 
 git clone https://github.com/Bethel-nz/goxeca.git
 cd goxeca
 
 ```
-
 
 Install Dependencies:
 
@@ -62,6 +56,7 @@ Install Dependencies:
 go mod tidy
 
 ```
+
 Run GoXeca:
 
 ```bash
@@ -69,7 +64,6 @@ Run GoXeca:
 go run main.go
 
 ```
-
 
 Future Enhancements
 
@@ -79,8 +73,6 @@ Future Enhancements
 
 [ ] Add support for persistence using Redis and PostgreSQL.
 
-
 License
 
 This project is licensed under the MIT License.
-
