@@ -14,7 +14,7 @@ GoXeca is a flexible and scalable job scheduling and execution system built in G
 
 ## Inspiration
 
-Albrow Jobs – Influenced the job processing and execution design.
+Albrow Jobs – Influenced the job processing and execution design. [here](https://github.com/albrow/jobs)
 
 ## Use Case
 
