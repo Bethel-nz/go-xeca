@@ -520,11 +520,23 @@ func (m *Manager) adjustConcurrency() {
 	cpuUsage, _ := cpu.Percent(time.Second, false)
 	avgCPUUsage := cpuUsage[0]
 
-	// Use exponential backoff for adjustments
-	if avgCPUUsage < 50 {
-		m.SetMaxConcurrent(m.maxConcurrent * 2)
+	log.Info("Current CPU usage", "usage", avgCPUUsage, "maxConcurrent", m.maxConcurrent)
+
+	if avgCPUUsage < 30 {
+		// Low CPU usage, try to resume paused jobs
+		m.resumePausedJobs()
+		newMax := m.maxConcurrent + 1
+		m.SetMaxConcurrent(newMax)
+		log.Info("Increased max concurrent jobs", "new_max", newMax)
 	} else if avgCPUUsage > 80 {
-		m.SetMaxConcurrent(m.maxConcurrent / 2)
+		// High CPU usage, pause least priority job and decrease concurrency
+		m.pauseLeastPriorityJob()
+		newMax := m.maxConcurrent - 1
+		if newMax < 1 {
+			newMax = 1
+		}
+		m.SetMaxConcurrent(newMax)
+		log.Info("Decreased max concurrent jobs", "new_max", newMax)
 	}
 }
 
@@ -546,7 +558,11 @@ func (m *Manager) pauseLeastPriorityJob() {
 		err := m.PauseJob(leastPriorityJob.ID)
 		if err != nil {
 			log.Error("Failed to pause job", "id", leastPriorityJob.ID, "error", err)
+		} else {
+			log.Info("Paused least priority job", "id", leastPriorityJob.ID, "priority", leastPriorityJob.Priority)
 		}
+	} else {
+		log.Info("No running jobs to pause")
 	}
 }
 
@@ -557,13 +573,23 @@ func (m *Manager) resumePausedJobs() {
 		return
 	}
 
+	resumedCount := 0
 	for _, job := range jobs {
 		if job.Status == JobStatusPaused {
 			err := m.ResumeJob(job.ID)
 			if err != nil {
 				log.Error("Failed to resume job", "id", job.ID, "error", err)
+			} else {
+				resumedCount++
+				log.Info("Resumed paused job", "id", job.ID)
 			}
 		}
+	}
+
+	if resumedCount == 0 {
+		log.Info("No paused jobs to resume")
+	} else {
+		log.Info("Resumed paused jobs", "count", resumedCount)
 	}
 }
 
