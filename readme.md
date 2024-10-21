@@ -67,13 +67,65 @@ go run main.go
 
 ```
 
+### Example with api
+
+// Job that runs once in 2 minutes
+
+```bash
+
+curl -X POST http://localhost:8080/api/add-job \
+     -H "Content-Type: application/json" \
+     -d '{
+         "command": "pinger ping",
+         "schedule": "in 2 minutes",
+         "isRecurring": false,
+         "priority": 10,
+         "dependencies": [],
+         "maxRetries": 3,
+         "retryDelay": 5000000000,
+         "webhook": "http://localhost:8080/api/webhook",
+         "timeout": 30000000000
+     }'
+```
+
+// Job that runs every 5 seconds
+
+```bash
+curl -X POST http://localhost:8080/api/add-job \
+     -H "Content-Type: application/json" \
+     -d '{
+         "command": "pinger ping",
+         "schedule": "every 5 seconds",
+         "isRecurring": true,
+         "priority": 5,
+         "dependencies": [],
+         "maxRetries": 3,
+         "retryDelay": 1000000000,
+         "webhook": "http://localhost:8080/api/webhook",
+         "timeout": 10000000000
+     }'
+```
+
+// After running these commands, you can check the status of jobs:
+
+```bash
+curl http://localhost:8080/api/jobs
+```
+
+// To stop a recurring job, use (replace JOB_ID with the actual job ID):
+
+```bash
+ curl -X POST http://localhost:8080/api/stop-job/JOB_ID
+
+```
+
 Future Enhancements
 
 [ ] Improve logging and error handling.
 
-[ ] Implement retry logic for failed jobs.
+[x] Implement retry logic for failed jobs.
 
-[ ] Add support for persistence using Redis and PostgreSQL.
+[x] Add support for persistence using Redis and PostgreSQL. - [x] redis - [] postgreSQL
 
 License
 
