@@ -10,45 +10,77 @@ import (
 )
 
 type Scheduler struct {
-	parser cron.Parser
+	cron *cron.Cron
 }
 
 func NewScheduler() *Scheduler {
 	return &Scheduler{
-		parser: cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		cron: cron.New(),
 	}
 }
 
 func (s *Scheduler) ParseSchedule(schedule string) (time.Time, time.Duration, error) {
-	if strings.HasPrefix(schedule, "in ") {
-		return s.parseRelativeSchedule(schedule)
+	if strings.HasPrefix(schedule, "every ") {
+		return s.parseEverySchedule(schedule)
+	} else if strings.HasPrefix(schedule, "in ") {
+		return s.parseInSchedule(schedule)
+	} else {
+		return s.parseCronSchedule(schedule)
 	}
-	return s.parseCronSchedule(schedule)
 }
 
-func (s *Scheduler) parseRelativeSchedule(schedule string) (time.Time, time.Duration, error) {
+func (s *Scheduler) parseEverySchedule(schedule string) (time.Time, time.Duration, error) {
 	parts := strings.Fields(schedule)
-	if len(parts) != 3 || parts[0] != "in" {
-		return time.Time{}, 0, fmt.Errorf("invalid schedule format: expected 'in X seconds/minutes/hours/days'")
+	if len(parts) != 3 {
+		return time.Time{}, 0, fmt.Errorf("invalid 'every' schedule format: %s", schedule)
 	}
 
-	amount, err := strconv.Atoi(parts[1])
+	quantity, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return time.Time{}, 0, fmt.Errorf("invalid time amount: %v", err)
+		return time.Time{}, 0, err
 	}
 
 	var duration time.Duration
 	switch parts[2] {
-	case "seconds", "second":
-		duration = time.Duration(amount) * time.Second
-	case "minutes", "minute":
-		duration = time.Duration(amount) * time.Minute
-	case "hours", "hour":
-		duration = time.Duration(amount) * time.Hour
-	case "days", "day":
-		duration = time.Duration(amount) * 24 * time.Hour
+	case "second", "seconds":
+		duration = time.Duration(quantity) * time.Second
+	case "minute", "minutes":
+		duration = time.Duration(quantity) * time.Minute
+	case "hour", "hours":
+		duration = time.Duration(quantity) * time.Hour
+	case "day", "days":
+		duration = time.Duration(quantity) * 24 * time.Hour
 	default:
-		return time.Time{}, 0, fmt.Errorf("unsupported time unit: %s", parts[2])
+		return time.Time{}, 0, fmt.Errorf("invalid time unit in schedule: %s", schedule)
+	}
+
+	nextRunTime := time.Now().Add(duration)
+	return nextRunTime, duration, nil
+}
+
+func (s *Scheduler) parseInSchedule(schedule string) (time.Time, time.Duration, error) {
+	parts := strings.Fields(schedule)
+	if len(parts) != 3 {
+		return time.Time{}, 0, fmt.Errorf("invalid 'in' schedule format: %s", schedule)
+	}
+
+	quantity, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("invalid quantity in schedule: %s", schedule)
+	}
+
+	var duration time.Duration
+	switch parts[2] {
+	case "second", "seconds":
+		duration = time.Duration(quantity) * time.Second
+	case "minute", "minutes":
+		duration = time.Duration(quantity) * time.Minute
+	case "hour", "hours":
+		duration = time.Duration(quantity) * time.Hour
+	case "day", "days":
+		duration = time.Duration(quantity) * 24 * time.Hour
+	default:
+		return time.Time{}, 0, fmt.Errorf("invalid time unit in schedule: %s", schedule)
 	}
 
 	nextRunTime := time.Now().Add(duration)
@@ -56,28 +88,22 @@ func (s *Scheduler) parseRelativeSchedule(schedule string) (time.Time, time.Dura
 }
 
 func (s *Scheduler) parseCronSchedule(schedule string) (time.Time, time.Duration, error) {
-	sched, err := s.parser.Parse(schedule)
+	cronSchedule, err := cron.ParseStandard(schedule)
 	if err != nil {
 		return time.Time{}, 0, fmt.Errorf("invalid cron schedule: %v", err)
 	}
 
-	now := time.Now()
-	nextRunTime := sched.Next(now)
-	duration := nextRunTime.Sub(now)
-
+	nextRunTime := cronSchedule.Next(time.Now())
+	duration := time.Until(nextRunTime)
 	return nextRunTime, duration, nil
 }
 
 func (s *Scheduler) GetNextRunTime(schedule string) time.Time {
-	if strings.HasPrefix(schedule, "in ") {
-		nextRunTime, _, _ := s.parseRelativeSchedule(schedule)
-		return nextRunTime
-	}
+	nextRunTime, _, _ := s.ParseSchedule(schedule)
+	return nextRunTime
+}
 
-	sched, err := s.parser.Parse(schedule)
-	if err != nil {
-		return time.Now().AddDate(100, 0, 0)
-	}
-
-	return sched.Next(time.Now())
+func (s *Scheduler) IsCronSchedule(schedule string) bool {
+	_, err := cron.ParseStandard(schedule)
+	return err == nil
 }
