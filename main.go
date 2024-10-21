@@ -16,9 +16,9 @@ func main() {
 
 	config := goxeca.ManagerConfig{
 		MaxConcurrent: 20,
-		RedisAddr:     "localhost:6379",
-		RedisPassword: "",
-		RedisDB:       1,
+		RedisAddr:     "localhost:6379", // <- ideally, you should store this in a .env file and read it
+		RedisPassword: "",               // <- same for this
+		RedisDB:       1,                // <- and this too
 		JobQueueSize:  100,
 	}
 	manager := goxeca.NewManager(config)
