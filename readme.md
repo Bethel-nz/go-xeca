@@ -12,9 +12,11 @@ GoXeca is a flexible and scalable job scheduling and execution system built in G
 
 - Scalability: Designed to scale across different job loads using Go’s goroutines for lightweight task execution.
 
+
 ## Inspiration
 
-Albrow Jobs – Influenced the job processing and execution design. [here](https://github.com/albrow/jobs)
+Albrow Jobs – Influenced the job processing and execution design. [here](https://github.com/albrow/)
+
 
 ## Use Case
 
@@ -30,13 +32,13 @@ Roadmap
 
 Here's what’s planned:
 
-[x] Fully optimize goroutine usage for improved concurrency management.
+[ x ] Fully optimize goroutine usage for improved concurrency management.
 
-[ ] Refine job execution time handling for better accuracy.
+[ o ] Refine job execution time handling for better accuracy.
 
-[ ] Implement advanced job chaining and dependency management.
+[ o ] Implement advanced job chaining and dependency management.
 
-[ ] Develop a React-based frontend to visualize and interact with scheduled jobs.
+[ o ] Develop a React-based frontend to visualize and interact with scheduled jobs.
 
 
 
@@ -121,11 +123,11 @@ curl http://localhost:8080/api/jobs
 
 Future Enhancements
 
-[ ] Improve logging and error handling.
+[ o ] Improve logging and error handling.
 
-[x] Implement retry logic for failed jobs.
+[ x ] Implement retry logic for failed jobs.
 
-[x] Add support for persistence using Redis and PostgreSQL. - [x] redis - [] postgreSQL
+[ x ] Add support for persistence using Redis and PostgreSQL. - [ x ] redis - [ o ] postgreSQL
 
 License
 
