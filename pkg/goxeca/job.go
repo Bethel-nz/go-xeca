@@ -15,6 +15,7 @@ const (
 	JobStatusCancelled = "cancelled"
 )
 
+// Defines a Go struct to represent the history of a job, including start and end times, duration, output, and status.
 type JobHistory struct {
 	StartTime time.Time
 	EndTime   time.Time
@@ -23,6 +24,7 @@ type JobHistory struct {
 	Status    string
 }
 
+// Defines a Go struct representing a job with scheduling parameters, execution history, and dependencies.
 type Job struct {
 	ID             string
 	Command        string

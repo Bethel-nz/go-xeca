@@ -3,6 +3,7 @@ package goxeca
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -98,7 +99,7 @@ func (x *XecaDB) DeleteJob(jobID string) error {
 func (x *XecaDB) UpdateJobStatus(jobID string, status string) error {
 	job, err := x.GetJob(jobID)
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			// Job doesn't exist, possibly already expired
 			return nil
 		}
@@ -139,7 +140,7 @@ func (x *XecaDB) Close() error {
 }
 
 // StoreJobWithTTL stores a job in Redis with a specified TTL
-// this is temportary and will be removed when we have a proper job storage with postgres
+// this is temporary and will be removed when we have a proper job storage with postgres
 func (x *XecaDB) StoreJobWithTTL(job *Job, ttl time.Duration) error {
 	jobJSON, err := json.Marshal(job)
 	if err != nil {

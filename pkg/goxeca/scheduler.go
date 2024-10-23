@@ -20,48 +20,18 @@ func NewScheduler() *Scheduler {
 }
 
 func (s *Scheduler) ParseSchedule(schedule string) (time.Time, time.Duration, error) {
-	if strings.HasPrefix(schedule, "every ") {
-		return s.parseEverySchedule(schedule)
-	} else if strings.HasPrefix(schedule, "in ") {
-		return s.parseInSchedule(schedule)
+	if strings.HasPrefix(schedule, "every ") || strings.HasPrefix(schedule, "in ") {
+		return s.parseHRSchedule(schedule)
+
 	} else {
 		return s.parseCronSchedule(schedule)
 	}
 }
 
-func (s *Scheduler) parseEverySchedule(schedule string) (time.Time, time.Duration, error) {
+func (s *Scheduler) parseHRSchedule(schedule string) (time.Time, time.Duration, error) { //Human Readable Schedule " HR Schedule "
 	parts := strings.Fields(schedule)
 	if len(parts) != 3 {
-		return time.Time{}, 0, fmt.Errorf("invalid 'every' schedule format: %s", schedule)
-	}
-
-	quantity, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return time.Time{}, 0, err
-	}
-
-	var duration time.Duration
-	switch parts[2] {
-	case "second", "seconds":
-		duration = time.Duration(quantity) * time.Second
-	case "minute", "minutes":
-		duration = time.Duration(quantity) * time.Minute
-	case "hour", "hours":
-		duration = time.Duration(quantity) * time.Hour
-	case "day", "days":
-		duration = time.Duration(quantity) * 24 * time.Hour
-	default:
-		return time.Time{}, 0, fmt.Errorf("invalid time unit in schedule: %s", schedule)
-	}
-
-	nextRunTime := time.Now().Add(duration)
-	return nextRunTime, duration, nil
-}
-
-func (s *Scheduler) parseInSchedule(schedule string) (time.Time, time.Duration, error) {
-	parts := strings.Fields(schedule)
-	if len(parts) != 3 {
-		return time.Time{}, 0, fmt.Errorf("invalid 'in' schedule format: %s", schedule)
+		return time.Time{}, 0, fmt.Errorf("invalid schedule format: %s", schedule)
 	}
 
 	quantity, err := strconv.Atoi(parts[1])

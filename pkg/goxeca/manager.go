@@ -2,6 +2,7 @@ package goxeca
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -41,6 +42,7 @@ type Manager struct {
 	workerPool     chan struct{}
 }
 
+// NewManager Initializes a new job manager with a configurable scheduler, executor, and Redis database connection. It features a job queue, concurrency limits, and cron job scheduling.
 func NewManager(config ManagerConfig) *Manager {
 	// Set default values if empty
 	if config.MaxConcurrent == 0 {
@@ -66,6 +68,7 @@ func NewManager(config ManagerConfig) *Manager {
 	return m
 }
 
+// AddJob Adds a new job to a job scheduling system. It parses the schedule, determines if it's recurring, persists the job data, and schedules it using either a human-readable time  or cron depending on the schedule type.
 func (m *Manager) AddJob(command string, schedule string, priority int, dependencies []string, maxRetries int, retryDelay time.Duration, webhook string, timeout time.Duration) (*Job, error) {
 	nextRunTime, duration, err := m.scheduler.ParseSchedule(schedule)
 	if err != nil {
@@ -302,7 +305,7 @@ func (m *Manager) handleJobCompletion(job *Job, output string, err error, startT
 
 // handleJobError handles the error of a job
 func (m *Manager) handleJobError(job *Job, err error, duration time.Duration, jobHistory *JobHistory) {
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		job.Status = JobStatusFailed
 		jobHistory.Status = JobStatusFailed
 		errorMsg := fmt.Sprintf("Job timed out after %v", duration)
@@ -372,7 +375,7 @@ func (m *Manager) StopJob(jobID string) error {
 
 	job.Status = JobStatusCancelled
 	if job.Recurring {
-		m.cron.Remove(cron.EntryID(job.cronEntryID))
+		m.cron.Remove(job.cronEntryID)
 	}
 
 	log.Info("Job cancelled", "id:", job.ID)
@@ -403,7 +406,7 @@ func (m *Manager) PauseJob(id string) error {
 	job.Paused = true
 	if job.Recurring {
 		if job.cronEntryID != 0 {
-			m.cron.Remove(cron.EntryID(job.cronEntryID))
+			m.cron.Remove(job.cronEntryID)
 		}
 		// For "every X" schedules, we don't need to do anything extra
 	}
@@ -471,7 +474,7 @@ func (m *Manager) GetJobOutput(jobID string) (string, error) {
 	}
 
 	// Return the output of the most recent execution
-	return string(job.History[len(job.History)-1].Output), nil
+	return job.History[len(job.History)-1].Output, nil
 }
 
 // CompleteRecurringJob completes a recurring job
@@ -487,7 +490,7 @@ func (m *Manager) CompleteRecurringJob(jobID string) error {
 
 	// Remove the cron entry
 	if job.cronEntryID != 0 {
-		m.cron.Remove(cron.EntryID(job.cronEntryID))
+		m.cron.Remove(job.cronEntryID)
 	}
 
 	// Mark the recurring job as completed
@@ -500,8 +503,7 @@ func (m *Manager) CompleteRecurringJob(jobID string) error {
 	return nil
 }
 
-// runAutoscaler runs the autoscaler best for systems with low memory or high memeory usage
-
+// runAutoscaler runs the autoscaler best for systems with low memory or high memory usage
 func (m *Manager) runAutoscaler() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -516,6 +518,7 @@ func (m *Manager) runAutoscaler() {
 	}
 }
 
+// adjustConcurrency Adjusts the maximum concurrent jobs dynamically based on CPU utilization, aiming to optimize resource consumption.
 func (m *Manager) adjustConcurrency() {
 	cpuUsage, _ := cpu.Percent(time.Second, false)
 	avgCPUUsage := cpuUsage[0]
@@ -529,7 +532,7 @@ func (m *Manager) adjustConcurrency() {
 		m.SetMaxConcurrent(newMax)
 		log.Info("Increased max concurrent jobs", "new_max", newMax)
 	} else if avgCPUUsage > 80 {
-		// High CPU usage, pause least priority job and decrease concurrency
+		// High CPU usage, pause the least priority job and decrease concurrency
 		m.pauseLeastPriorityJob()
 		newMax := m.maxConcurrent - 1
 		if newMax < 1 {
@@ -540,6 +543,7 @@ func (m *Manager) adjustConcurrency() {
 	}
 }
 
+// pauseLeastPriorityJob Finds the running job with the lowest priority and pauses it.
 func (m *Manager) pauseLeastPriorityJob() {
 	jobs, err := m.ListJobs()
 	if err != nil {
@@ -566,6 +570,7 @@ func (m *Manager) pauseLeastPriorityJob() {
 	}
 }
 
+// resumePausedJobs Iterates through a list of jobs, resuming any that are paused and logging the outcome.
 func (m *Manager) resumePausedJobs() {
 	jobs, err := m.ListJobs()
 	if err != nil {
